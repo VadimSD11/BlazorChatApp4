@@ -1,0 +1,62 @@
+﻿@page "/chat"
+@inject NavigationManager NavigationManager
+@inject HttpClient HttpClient
+@using BlazorChatApp4.Shared;
+@using Microsoft.AspNetCore.SignalR.Client;
+@using Azure.AI.TextAnalytics;
+
+
+<h3>Chat</h3>
+@if (IsConnected)
+{
+    <input type="text" @bind="userinput" placeholder="Enter your username" />
+    <input type="text" @bind="messageinput" placeholder="Enter your message" />
+    <button @onclick="Send">Send</button>
+    <ul id="messagesList">
+        @foreach (var message in messages)
+        {
+            <li style="color:@(GetMessageColor(message.Sentiment))">@message.Username: @message.Message (@message.Timestamp) - @message.Sentiment</li>
+        }
+    </ul>
+}
+else
+{
+    <span>Connecting...</span>
+}
+
+@code {
+    private HubConnection hubConnection;
+    private List<ChatMessage> messages = new List<ChatMessage>();
+    private string userinput;
+    private string messageinput;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hubConnection = new HubConnectionBuilder().WithUrl(NavigationManager.ToAbsoluteUri("/chathub")).Build();
+        hubConnection.On<string, string, string>("ReceiveMessage", async (user, message, sentiment) =>
+        {
+            var newMessage = new ChatMessage { Username = user, Message = message, Sentiment = sentiment, Timestamp = DateTime.UtcNow };
+            messages.Add(newMessage);
+            await InvokeAsync(StateHasChanged);
+        });
+
+        await hubConnection.StartAsync();
+
+        messages = await HttpClient.GetFromJsonAsync<List<ChatMessage>>("/api/chatmessages");
+    }
+
+    Task Send() => hubConnection.SendAsync("SendMessage", userinput, messageinput);
+    public bool IsConnected => hubConnection.State == HubConnectionState.Connected;
+
+    private string GetMessageColor(string sentiment)
+    {
+        return sentiment switch
+        {
+            "Positive" => "green",
+            "Negative" => "red",
+            _ => "black",
+        };
+    }
+}
+
+
